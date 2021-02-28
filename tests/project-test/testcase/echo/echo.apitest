@@ -1,0 +1,34 @@
+SET     $method     POST
+SET     $url        http://127.0.0.1:8080/echo
+SET     $BASE_REQ       {
+    $headers:
+        Authorization: Bearer KEY
+}
+SET     $data   {{"data": "XXX"}}
+
+SECT    Call POST echo should pass
+REQ     $method     $url      $BASE_REQ  +  {"data": "Test string 1234"}  +  $data  +  {{"data": "Test string 1234"}}
+RES     {
+    $status: 200
+    echo: "Test string 1234"
+}
+
+
+SECT    Call GET echo should get 404
+REQ     GET         $url
+RES     {"$status": 404}
+
+
+SECT    Call POST with template
+REQ     $method     $url        $BASE_REQ  +  @template/echo.yaml:case1.request
+RES     @:case1.response
+
+
+SECT    Call POST without data
+REQ     $method     $url
+RES     {$status: 400}
+
+
+SECT    Test var
+REQ     $method     $url
+RES     {$status: 400}

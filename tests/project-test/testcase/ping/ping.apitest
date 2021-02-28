@@ -1,0 +1,47 @@
+SECT    Call GET ping should get OK
+REQ     GET     http://127.0.0.1:8080/ping
+RES     {{
+    "$status": 200,
+    "status":"OK"
+}}
+
+SECT    Call POST ping should get ERROR
+REQ     POST    http://127.0.0.1:8080/ping
+RES     {$status: 404}
+
+SECT    Test 1
+REQ
+...
+...     GET
+...
+...     http://127.0.0.1:8080/ping
+...
+...
+RES     @template/ping.yaml:response
+
+
+/* ================================================ */ SECTION  Test 2
+REQ
+...     GET
+...     http://127.0.0.1:8080/ping
+
+/*
+GET  http://127.0.0.1:8080/ping
+RES  {
+    $status: 200
+    status: OK
+}
+RES  {"$status": 200, "status": "OK"}
+
+/*
+SECTION  Call /ping template
+REQ  @/template/ping:method  @:url  @:request
+RES  @/template/ping:response
+
+SECTION  Call /ping template 2
+USE  @/template/ping
+REQ  @:method  @:url  @:request
+RES  @:response
+*/
+
+SECTION  test2

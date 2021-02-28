@@ -1,0 +1,6 @@
+method: "GET"
+path: "/ping"
+request: null
+response:
+  $status: 200
+  status: OK

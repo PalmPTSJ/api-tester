@@ -1,0 +1,6 @@
+case1:
+  request: 
+    data: Test data 1234
+  response:
+    $status: 200
+    echo: Test data 1234
