@@ -1,0 +1,8 @@
+case1:
+  method: POST
+  url: http://127.0.0.1:8080/echo
+  request: 
+    data: Test data 1234
+  response:
+    $status: 200
+    echo: Test data 1234

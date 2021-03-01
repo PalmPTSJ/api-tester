@@ -1,0 +1,39 @@
+/* Version 1.0 */
+
+SECT    GET
+REQ     GET     http://127.0.0.1:8080/ping  /* Simple GET without data */
+RES     {
+    $status: 200
+    status: OK
+}   /* Expect status code and data (YAML) */
+
+
+SECT    POST
+REQ     POST    
+...     http://127.0.0.1:8080/echo                      /* ... = Continuation symbol */
+...     {data: Test String 1234}                        /* POST with data */
+RES     {{"$status":200, "echo":"Test String 1234"}}    /* Expect data (JSON) */
+
+
+SECT    Variables
+SET     $method     POST
+SET     $url        http://127.0.0.1:8080/echo
+SET     $data       {data: ABC}
+SET     $expect     {{"echo": "ABC"}}
+REQ     $method     $url    $data
+RES     $expect
+
+
+SECT    At (@) Variables
+REQ     @template.yaml:case1.method     @:case1.url     @:case1.request     /* @<filename>:<accessor> */
+RES     @:case1.response                                                    /* if filename is empty, reuse last file */
+
+
+SECT    Add (+) operator
+SET     $base_url   http://127.0.0.1:8080/
+SET     $base_data  {a: 123}
+REQ     PO  +  ST   
+...     $base_url  +  full-echo       /* Add string/variables */
+...     $base_data  +  {b: 456}        /* Add object */
+...     +  {$header: {My-Header: GGEZ}}
+RES     {{"$status":200, "a":123, "b":456, "$header.My-Header": GGEZ}}

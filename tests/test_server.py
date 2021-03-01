@@ -30,6 +30,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self.respJSON({'echo': data["data"]})
+        elif method == "POST" and path == "/full-echo":
+            self.send_response(200)
+            for h in self.headers.keys():
+                print("Header %s: %s", h, self.headers.get(h))
+                self.send_header(h, self.headers.get(h))
+            self.respJSON(data)
         else :
             self.send_response(404)
             self.end_headers()

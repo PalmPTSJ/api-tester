@@ -71,6 +71,7 @@ class APT() :
                 if fname == "":
                     return do(env.getAtVar())
                 if not os.path.exists(fname) or not os.path.isfile(fname):
+                    print("File not exists:" + fname)
                     return None
                 with open(fname, "r") as f:
                     data = yaml.safe_load(f)
@@ -129,6 +130,15 @@ class APT() :
                 pos += 1
             return True, pos, self.data[spos:pos]
 
+        def ExpectNonCode(self, pos: int) -> typing.Tuple[bool, int, str]:
+            """ Expect whitespace or comment part until reach next code"""
+            while pos < len(self.data):
+                spos = pos
+                _, pos, _ = self.ExpectComment(pos)
+                _, pos, _ = self.ExpectWhitespace(pos)
+                if pos == spos: break
+            return True, pos, ""
+
         def ExpectOptionalParam(self, pos:int) -> typing.Tuple[bool, int, str]: # Some param can be optional.
             while pos < len(self.data):
                 if self.data[pos] == "\n":
@@ -143,14 +153,7 @@ class APT() :
             return pos >= len(self.data), pos, ""
 
         def ExpectString(self, pos: int) -> typing.Tuple[bool, int, str]: # REQ, https://x.y, 123.45, 
-            """  
-            Expect simple string. No new line between string. 
-
-            Single space can be in string (double or more spaces are treated as separator)
-
-            Example: https://127.0.0.1/ping, 12345, A string here, Template string: ${var}
-            """
-            _, pos, _ = self.ExpectWhitespace(pos)
+            _, pos, _ = self.ExpectNonCode(pos)
             res = ""
             while pos < len(self.data):
                 if self.data[pos] in ["\t", "\n", "\r"]: 
@@ -163,21 +166,17 @@ class APT() :
             return True, pos, res
 
         def ExpectOp(self, pos: int) -> typing.Tuple[bool, int, str]: # TODO:
-            _, pos, _ = self.ExpectWhitespace(pos)
+            _, pos, _ = self.ExpectNonCode(pos)
             if self.data[pos:pos+1] == "+": # Add operator
                 return True, pos+1, "+"
 
             return False, pos, None
 
-        def ExpectExpr(self, pos: int) -> typing.Tuple[bool, int, typing.Any]: # 1, {"x": "json"}, YML{x: json}, asdf, 1 + 2, 1    +     2
-            #print("Parsing Expr at: <%s>" % (self.data[pos:pos+20].encode()))
-            _, pos, _ = self.ExpectWhitespace(pos)
-            res = None
-            def addRes(data): # FUTURE: Handle operation left right 
-                nonlocal res
-                res = data 
+        def ScanExpr(self, pos: int) -> typing.Tuple[bool, int, typing.Any]: # 1, {"x": "json"}, YML{x: json}, asdf, 1 + 2, 1    +     2
+            _, pos, _ = self.ExpectNonCode(pos)
+            res = None 
             if pos >= len(self.data): return False, pos, None
-            if self.data[pos] == '{': # YAML
+            if self.data[pos] == '{': # Object lit
                 pos += 1
                 bracket = 0
                 yamlData = ""
@@ -189,18 +188,18 @@ class APT() :
                     if self.data[pos] == '\\': pos += 1 # Escaping
                     yamlData += self.data[pos:pos+1]
                     pos += 1
-                addRes(APT.Expr.Object(yaml.safe_load(yamlData)))
+                res = APT.Expr.Object(yaml.safe_load(yamlData))
                 self.pos = pos
             elif self.Peek(self.ExpectString): # String data as generic lit
-                addRes(APT.Expr.StringLit(self.Scan(self.ExpectString)).deriveType())
+                res = APT.Expr.StringLit(self.Scan(self.ExpectString)).deriveType()
                 pos = self.pos
-
+                
             if not self.Peek(self.ExpectOp): # No operation comes after this so the expression ends here
                 return True, pos, res
 
             op = self.Scan(self.ExpectOp)
             if op in ["+"]: # If is in binary op
-                ok, pos, rightExpr = self.ExpectExpr(self.pos)
+                ok, pos, rightExpr = self.ScanExpr(self.pos)
                 if not ok :
                     return False, pos, res
                 res = APT.Expr.BinOp(op, res, rightExpr)
@@ -234,19 +233,19 @@ class APT() :
             val = self.Scan(self.ExpectString)
             self.lastStatementPos = self.pos
             if val == APT.Token.SECT : # SECT  [name]
-                name = self.Scan(self.ExpectExpr)
+                name = self.Scan(self.ScanExpr)
                 return APT.Statement.Section(name)
             if val == APT.Token.REQ: # REQ  [method]  [url]  [data?]
-                method = self.Scan(self.ExpectExpr)
-                url = self.Scan(self.ExpectExpr)
-                data = self.Scan(self.ExpectExpr) if self.Peek(self.ExpectOptionalParam) else None
+                method = self.Scan(self.ScanExpr)
+                url = self.Scan(self.ScanExpr)
+                data = self.Scan(self.ScanExpr) if self.Peek(self.ExpectOptionalParam) else None
                 return APT.Statement.Request(method, url, data)
             if val == APT.Token.RES: # RES  [data?]
-                data = self.Scan(self.ExpectExpr)
+                data = self.Scan(self.ScanExpr)
                 return APT.Statement.Response(data)
             if val == APT.Token.SET: # SET  [varname]  [data]
                 varname = self.Scan(self.ExpectString)
-                data = self.Scan(self.ExpectExpr)
+                data = self.Scan(self.ScanExpr)
                 return APT.Statement.Set(varname, data)
             else: return "UNKNOWN STATEMENT: "+val
 
@@ -290,7 +289,12 @@ class APTRunner():
                     else:
                         data = stmt.data.resolve(self.env)
                         print("    Requesting", data)
-                        self.lastRes = requests.request(method, url, data=json.dumps(data))
+                        headers = {}
+                        if "$header" in data:
+                            for k in data["$header"]:
+                                headers[k] = str(data["$header"][k])
+                            del data["$header"]
+                        self.lastRes = requests.request(method, url, data=json.dumps(data), headers=headers, timeout=1)
                 except Exception as e:
                     self.Fail("Request error: %s" % e)
 
