@@ -285,7 +285,7 @@ class APTRunner():
                 url = stmt.url.resolve(self.env)
                 try :
                     if stmt.data == None:
-                        self.lastRes = requests.request(method, url)
+                        self.lastRes = requests.request(method, url, verify=False)
                     else:
                         data = stmt.data.resolve(self.env)
                         print("    Requesting", data)
@@ -294,7 +294,7 @@ class APTRunner():
                             for k in data["$header"]:
                                 headers[k] = str(data["$header"][k])
                             del data["$header"]
-                        self.lastRes = requests.request(method, url, data=json.dumps(data), headers=headers, timeout=1)
+                        self.lastRes = requests.request(method, url, data=json.dumps(data), headers=headers, timeout=1, verify=False)
                 except Exception as e:
                     self.Fail("Request error: %s" % e)
 
