@@ -45,6 +45,48 @@ ASSERT  $subtest    Hello subtest   /* Assertion */
 
 SECT    Special vars
 PRINT   {{"test": "123"}}           /* Print */
-PRINT   $random                     /* Special vars */
-PRINT   $timestamp
-PRINT   $uid
+PRINT   $_RANDOM                     /* Special vars */
+PRINT   $_TIMESTAMP
+PRINT   $_UID
+
+
+/* Version 1.1.1 */
+SECT    Object resolve
+SET     $street     ABCD St
+SET     $id     $_UID
+REQ     POST    http://127.0.0.1:8080/full-echo     {
+    name: Test
+    id: $id
+    address:
+        street: $street
+}
+RES     {{"$status":200, "name": "Test", "address.street": "ABCD St", "id": "$id"}}
+
+
+/* Version 1.2 */
+SECT    Set var from response
+REQ     POST    http://127.0.0.1:8080/full-echo     {
+    op: query
+    id: 123
+    obj:
+        id: 456
+}
+RES     {
+    $status: 200
+    $set:
+        - op -> $op
+        - id -> $id
+        - obj.id -> $id2
+}
+
+ASSERT      $op     query
+
+REQ     POST    http://127.0.0.1:8080/full-echo     {
+    op: delete
+    id: $id
+    id2: $id2
+}
+RES     {
+    id: 123
+    id2: 456
+}

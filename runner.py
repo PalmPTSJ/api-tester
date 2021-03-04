@@ -19,9 +19,9 @@ class APTEnv():
     def __init__(self):             
         self.vars, self.at = ({}, None)
         self.specialVars = {
-            "$random": lambda : random.randint(0,999999999),
-            "$timestamp": lambda : int(time.time()),
-            "$uid": lambda : datetime.now().strftime("%Y%m%d%H%M%S") + str(random.randint(0,999999999))
+            "$_RANDOM": lambda : random.randint(0,999999999),
+            "$_TIMESTAMP": lambda : int(time.time()),
+            "$_UID": lambda : datetime.now().strftime("%Y%m%d%H%M%S") + str(random.randint(0,999999999))
         }
     def setVar(self, varname, val): self.vars[normalizeVarname(varname)] = val
     def setAtVar(self, val):        self.at = val
@@ -47,7 +47,24 @@ class APT() :
             def __str__(self):          return str(self.val)
             def resolve(self, env):     return self.val
         class Null(Base): pass
-        class Object(Base): pass # TODO: Recursively resolve value
+        class Object(Base): 
+            def resolve(self, env):
+                def do(data): # Copy and resolve
+                    nonlocal env
+                    if isinstance(data, dict):
+                        o = {}
+                        for k in data:
+                            o[k] = do(data[k])
+                        return o
+                    elif isinstance(data, list):
+                        l = []
+                        for d in data:
+                            l.append(do(d))
+                        return l
+                    elif isinstance(data, str):
+                        return APT.Expr.StringLit(data).resolve(env)
+                    return data
+                return do(self.val)
         class String(Base): pass
         class Int(Base): pass
         class Float(Base): pass
@@ -338,11 +355,11 @@ class APTRunner():
 
             if isinstance(stmt, APT.Statement.Response): # Response
                 stmt:APT.Statement.Response
-                data = stmt.data.resolve(self.env)
-                if data == None:
+                expect = stmt.data.resolve(self.env)
+                if expect == None:
                     self.Fail("Expecting 'None' is not allowed")
                     return
-                print("    Expecting", data)
+                print("    Expecting", expect)
 
                 res = {
                     "$status": None,
@@ -357,7 +374,14 @@ class APTRunner():
                         res.update(self.lastRes.json())
                 except: pass
 
-                self.DoAssert(res, data)
+                # Extract var with {$set: ["field.field -> $aaa"]}
+                if "$set" in expect:
+                    for setcmd in expect["$set"]:
+                        field, var = setcmd.split("->")
+                        self.env.setVar(var.strip(), accessObj(res, field.strip()))
+                    del expect["$set"]
+                    
+                self.DoAssert(res, expect)
 
             if isinstance(stmt, APT.Statement.Set): # Set
                 stmt:APT.Statement.Set
