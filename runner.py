@@ -1,11 +1,4 @@
-import sys
-import os
-import typing
-import enum
-import requests
-import json
-import yaml
-import re
+import sys, os, typing, enum, requests, json, yaml, re, random, time
 from datetime import datetime
 
 def accessObj(obj: dict, accessor: str):
@@ -23,11 +16,20 @@ def normalizeVarname(name):
 
 class APTEnv():
     """ Base Environment manager """
-    def __init__(self):             self.vars, self.at = ({}, None)
+    def __init__(self):             
+        self.vars, self.at = ({}, None)
+        self.specialVars = {
+            "$random": lambda : random.randint(0,999999999),
+            "$timestamp": lambda : int(time.time()),
+            "$uid": lambda : datetime.now().strftime("%Y%m%d%H%M%S") + str(random.randint(0,999999999))
+        }
     def setVar(self, varname, val): self.vars[normalizeVarname(varname)] = val
-    def getVar(self, varname):      return None if normalizeVarname(varname) not in self.vars else self.vars[normalizeVarname(varname)]
     def setAtVar(self, val):        self.at = val
     def getAtVar(self):             return self.at
+    def getVar(self, varname):      
+        if normalizeVarname(varname) in self.specialVars:
+            return self.specialVars[normalizeVarname(varname)]()
+        return None if normalizeVarname(varname) not in self.vars else self.vars[normalizeVarname(varname)]
 
 class APT() :
     class Token():
@@ -35,6 +37,9 @@ class APT() :
         SECT = "SECT"
         RES = "RES"
         SET = "SET"
+        PREREQ = "PREREQ" # PRE Requisite
+        ASSERT = "ASSERT"
+        PRINT = "PRINT"
 
     class Expr():
         class Base():
@@ -86,7 +91,7 @@ class APT() :
             def resolve(self, env): 
                 self.left = self.left.resolve(env)
                 self.right = self.right.resolve(env)
-                if self.op == "+":
+                if self.op == "+": # TODO: Move to env
                     if isinstance(self.left, dict) and isinstance(self.right, dict):
                         data = self.left
                         data.update(self.right)
@@ -106,6 +111,15 @@ class APT() :
         class Set():
             def __init__(self, varname:str, data:'APT.Expr.Base'):          self.varname, self.data = varname, data
             def __str__(self):                                              return "SET <%s> <%s>" % (self.varname, self.data)
+        class Prereq():
+            def __init__(self, filename:str):                               self.filename = filename
+            def __str__(self):                                              return "PREREQ <%s>" % (self.filename)
+        class Assert():
+            def __init__(self, data:'APT.Expr.Base', a:'APT.Expr.Base'):    self.data, self.assertion = data, a
+            def __str__(self):                                              return "ASSERT <%s> <%s>" % (self.data, self.assertion)
+        class Print():
+            def __init__(self, data:'APT.Expr.Base'):                       self.data = data
+            def __str__(self):                                              return "PRINT <%s> <%s>" % (self.data)
     
     class Scanner():
         def ExpectComment(self, pos: int) -> typing.Tuple[bool, int, str]:
@@ -247,6 +261,16 @@ class APT() :
                 varname = self.Scan(self.ExpectString)
                 data = self.Scan(self.ScanExpr)
                 return APT.Statement.Set(varname, data)
+            if val == APT.Token.PREREQ: # PREREQ  [filename]
+                filename = self.Scan(self.ExpectString)
+                return APT.Statement.Prereq(filename)
+            if val == APT.Token.ASSERT: # ASSERT  [data]  [assertion]
+                data = self.Scan(self.ScanExpr)
+                assertion = self.Scan(self.ScanExpr)
+                return APT.Statement.Assert(data, assertion)
+            if val == APT.Token.PRINT: # PRINT  [data]
+                data = self.Scan(self.ScanExpr)
+                return APT.Statement.Print(data)
             else: return "UNKNOWN STATEMENT: "+val
 
 
@@ -261,16 +285,30 @@ class APT() :
 
 # APT Runner
 class APTRunner():
-    def __init__(self, f: typing.TextIO):
+    def __init__(self, f: typing.TextIO, isSubtest = False, env = None):
         self.APT = APT(f)
         self.lastRes = None
         self.testFailed = False
-        self.env = APTEnv()
-
+        self.isSubtest = isSubtest
+        self.env = APTEnv() if env == None else env
     def Fail(self, msg):
         self.testFailed = True
         print("    [FAILED] at line %d: %s" % (self.APT.scanner.GetLastStatementLineNumber(), msg))
-
+    def DoAssert(self, data, assertion):
+        def check(obj, expect, kPrefix):    
+            for k in expect:
+                actual = accessObj(obj,k)
+                if isinstance(expect[k], dict):
+                    check(actual, expect[k], kPrefix + k + ".")
+                else:
+                    if actual != expect[k]:
+                        self.Fail("response not matched at [%s]. Expected=%s, Actual=%s" % (kPrefix + k, expect[k], actual))
+        if isinstance(assertion, dict):
+            check(data, assertion, "")
+        else:
+            if data != assertion:
+                self.Fail("Assertion failed. Expected=%s, Actual=%s" % (assertion, data))
+            
     def Run(self):
         while self.APT.scanner.error == None and not self.APT.scanner.eof:
             stmt = self.APT.Next()
@@ -298,7 +336,7 @@ class APTRunner():
                 except Exception as e:
                     self.Fail("Request error: %s" % e)
 
-            if isinstance(stmt, APT.Statement.Response):
+            if isinstance(stmt, APT.Statement.Response): # Response
                 stmt:APT.Statement.Response
                 data = stmt.data.resolve(self.env)
                 if data == None:
@@ -319,27 +357,35 @@ class APTRunner():
                         res.update(self.lastRes.json())
                 except: pass
 
-                def check(obj, expect, kPrefix):    
-                    for k in expect:
-                        actual = accessObj(obj,k)
-                        if isinstance(expect[k], dict):
-                            check(actual, expect[k], kPrefix + k + ".")
-                        else:
-                            if actual != expect[k]:
-                                self.Fail("response not matched at [%s]. Expected=%s, Actual=%s" % (kPrefix + k, actual, expect[k]))
+                self.DoAssert(res, data)
 
-                if isinstance(data, dict):
-                    check(res, data, "")
-                else:
-                    self.Fail("unknown response expectation: %s" %(data))
-
-            if isinstance(stmt, APT.Statement.Set):
+            if isinstance(stmt, APT.Statement.Set): # Set
                 stmt:APT.Statement.Set
                 self.env.setVar(stmt.varname, stmt.data.resolve(self.env))
-        if not self.testFailed:
-            print("All test passed!")
-        else:
-            print("Test failed. See logs for error")
+            if isinstance(stmt, APT.Statement.Prereq): # Prerequisite
+                stmt:APT.Statement.Prereq
+                with open(stmt.filename, "r") as f:
+                    subrunner = APTRunner(f, True, self.env)
+                    subrunner.Run()
+                    if subrunner.testFailed:
+                        self.Fail("Prerequisite failed")
+
+            if isinstance(stmt, APT.Statement.Assert): # Assert
+                stmt:APT.Statement.Assert
+                data = stmt.data.resolve(self.env)
+                assertion = stmt.assertion.resolve(self.env)
+                self.DoAssert(data, assertion)
+
+            if isinstance(stmt, APT.Statement.Print): # Print
+                stmt:APT.Statement.Print
+                data = stmt.data.resolve(self.env)
+                print("    [PRINT] at line %d: %s" % (self.APT.scanner.GetLastStatementLineNumber(), str(data)))
+
+        if not self.isSubtest:
+            if not self.testFailed:
+                print("All test passed!")
+            else:
+                print("Test failed. See logs for error")
 
 def run(filepath):
     _, ext = os.path.splitext(filepath)

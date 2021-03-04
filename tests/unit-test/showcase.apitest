@@ -37,3 +37,14 @@ REQ     PO  +  ST
 ...     $base_data  +  {b: 456}        /* Add object */
 ...     +  {$header: {My-Header: GGEZ}}
 RES     {{"$status":200, "a":123, "b":456, "$header.My-Header": GGEZ}}
+
+
+/* Version 1.1 */
+PREREQ  subtest.subtest             /* Pre requisite */
+ASSERT  $subtest    Hello subtest   /* Assertion */
+
+SECT    Special vars
+PRINT   {{"test": "123"}}           /* Print */
+PRINT   $random                     /* Special vars */
+PRINT   $timestamp
+PRINT   $uid

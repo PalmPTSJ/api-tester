@@ -1,0 +1,7 @@
+SECT    Subtest
+SET     $subtest    Hello subtest
+REQ     GET     http://127.0.0.1:8080/ping
+RES     {
+    $status: 200
+    status: OK
+}
